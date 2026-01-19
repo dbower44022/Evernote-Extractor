@@ -8,44 +8,471 @@ from pathlib import Path
 
 import streamlit as st
 
-# Handle imports for both module and direct execution
-try:
-    from .converter import convert_note
-    from .database import ImportDatabase, ImportStatus
-    from .enex_parser import count_notes_in_enex, parse_enex_directory, parse_enex_file
-    from .progress import generate_note_identifier
-    from .xwiki_client import XWikiClient
-    from .evernote_api import (
-        EvernoteClient,
-        EvernoteCredentials,
-        EvernoteOAuth,
-        load_token,
-        save_token,
-        delete_token,
-    )
-except ImportError:
-    # Add parent directory to path for direct execution
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from evernote_extractor.converter import convert_note
-    from evernote_extractor.database import ImportDatabase, ImportStatus
-    from evernote_extractor.enex_parser import count_notes_in_enex, parse_enex_directory, parse_enex_file
-    from evernote_extractor.progress import generate_note_identifier
-    from evernote_extractor.xwiki_client import XWikiClient
-    from evernote_extractor.evernote_api import (
-        EvernoteClient,
-        EvernoteCredentials,
-        EvernoteOAuth,
-        load_token,
-        save_token,
-        delete_token,
-    )
+# Handle imports - add parent to path for package imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from Evernote_Extractor.converter import convert_note
+from Evernote_Extractor.database import ImportDatabase, ImportStatus
+from Evernote_Extractor.enex_parser import count_notes_in_enex, parse_enex_directory, parse_enex_file
+from Evernote_Extractor.progress import generate_note_identifier
+from Evernote_Extractor.xwiki_client import XWikiClient
+from Evernote_Extractor.evernote_api import (
+    EvernoteClient,
+    EvernoteCredentials,
+    EvernoteOAuth,
+    load_token,
+    save_token,
+    delete_token,
+)
 
 # Page config
 st.set_page_config(
     page_title="Evernote to XWiki Importer",
     page_icon="📝",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
+
+# Custom CSS for professional styling
+st.markdown("""
+<style>
+    /* Import Google Font */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    /* Global styles */
+    .stApp {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    /* Hide default Streamlit header and footer */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* Main content area */
+    .main .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        max-width: 1200px;
+    }
+
+    /* Custom header styling */
+    .main-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem 2.5rem;
+        border-radius: 16px;
+        margin-bottom: 2rem;
+        box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
+    }
+
+    .main-header h1 {
+        color: white !important;
+        font-size: 2.2rem !important;
+        font-weight: 700 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    .main-header p {
+        color: rgba(255, 255, 255, 0.9) !important;
+        font-size: 1.1rem !important;
+        margin-top: 0.5rem !important;
+        margin-bottom: 0 !important;
+    }
+
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #1a1f36 0%, #252d4a 100%);
+        padding-top: 1rem;
+    }
+
+    [data-testid="stSidebar"] .stRadio > label {
+        color: rgba(255, 255, 255, 0.6) !important;
+        font-size: 0.75rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-weight: 600;
+    }
+
+    [data-testid="stSidebar"] .stRadio > div {
+        gap: 0.25rem;
+    }
+
+    [data-testid="stSidebar"] .stRadio > div > label {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        padding: 0.75rem 1rem !important;
+        margin: 0.25rem 0;
+        transition: all 0.2s ease;
+        border: 1px solid transparent;
+    }
+
+    [data-testid="stSidebar"] .stRadio > div > label:hover {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(102, 126, 234, 0.5);
+    }
+
+    [data-testid="stSidebar"] .stRadio > div > label[data-checked="true"] {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-color: transparent;
+    }
+
+    [data-testid="stSidebar"] .stRadio > div > label span,
+    [data-testid="stSidebar"] .stRadio > div > label p,
+    [data-testid="stSidebar"] .stRadio > div > label div,
+    [data-testid="stSidebar"] .stRadio label,
+    [data-testid="stSidebar"] .stRadio p,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+        color: white !important;
+        font-weight: 500;
+    }
+
+    /* Ensure all sidebar text is visible */
+    [data-testid="stSidebar"] * {
+        color: white;
+    }
+
+    [data-testid="stSidebar"] .stRadio > div {
+        color: white !important;
+    }
+
+    /* Sidebar logo area */
+    .sidebar-logo {
+        padding: 1.5rem;
+        text-align: center;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        margin-bottom: 1rem;
+    }
+
+    .sidebar-logo h2 {
+        color: white !important;
+        font-size: 1.3rem !important;
+        font-weight: 700 !important;
+        margin: 0 !important;
+    }
+
+    .sidebar-logo p {
+        color: rgba(255, 255, 255, 0.5) !important;
+        font-size: 0.8rem !important;
+        margin-top: 0.25rem !important;
+    }
+
+    /* Card styling */
+    .config-card {
+        background: white;
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+        border: 1px solid #e5e7eb;
+        margin-bottom: 1.5rem;
+    }
+
+    .config-card-header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid #f3f4f6;
+    }
+
+    .config-card-header h3 {
+        color: #1f2937 !important;
+        font-size: 1.1rem !important;
+        font-weight: 600 !important;
+        margin: 0 !important;
+    }
+
+    .config-card-icon {
+        width: 36px;
+        height: 36px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.1rem;
+    }
+
+    /* Section headers */
+    .section-header {
+        color: #1f2937;
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin: 1.5rem 0 1rem 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .section-subheader {
+        color: #6b7280;
+        font-size: 0.95rem;
+        margin-bottom: 1.5rem;
+    }
+
+    /* Metric cards */
+    .metric-card {
+        background: white;
+        border-radius: 12px;
+        padding: 1.25rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        border: 1px solid #e5e7eb;
+        text-align: center;
+    }
+
+    .metric-value {
+        font-size: 2rem;
+        font-weight: 700;
+        color: #1f2937;
+        line-height: 1.2;
+    }
+
+    .metric-label {
+        font-size: 0.85rem;
+        color: #6b7280;
+        margin-top: 0.25rem;
+        font-weight: 500;
+    }
+
+    .metric-success { color: #059669 !important; }
+    .metric-danger { color: #dc2626 !important; }
+    .metric-warning { color: #d97706 !important; }
+    .metric-info { color: #667eea !important; }
+
+    /* Input styling */
+    .stTextInput > div > div > input {
+        border-radius: 8px;
+        border: 1.5px solid #e5e7eb;
+        padding: 0.625rem 0.875rem;
+        font-size: 0.95rem;
+        transition: all 0.2s ease;
+    }
+
+    .stTextInput > div > div > input:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+    }
+
+    /* Button styling */
+    .stButton > button {
+        border-radius: 8px;
+        font-weight: 600;
+        padding: 0.5rem 1.25rem;
+        transition: all 0.2s ease;
+        border: none;
+    }
+
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        box-shadow: 0 4px 14px rgba(102, 126, 234, 0.4);
+    }
+
+    .stButton > button[kind="primary"]:hover {
+        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+        transform: translateY(-1px);
+    }
+
+    .stButton > button[kind="secondary"] {
+        background: white;
+        color: #374151;
+        border: 1.5px solid #e5e7eb;
+    }
+
+    .stButton > button[kind="secondary"]:hover {
+        background: #f9fafb;
+        border-color: #d1d5db;
+    }
+
+    /* Expander styling */
+    .streamlit-expanderHeader {
+        background: #f9fafb;
+        border-radius: 8px;
+        font-weight: 600;
+        color: #374151;
+    }
+
+    .streamlit-expanderContent {
+        border: 1px solid #e5e7eb;
+        border-top: none;
+        border-radius: 0 0 8px 8px;
+        padding: 1rem;
+    }
+
+    /* Progress bar */
+    .stProgress > div > div {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 10px;
+    }
+
+    .stProgress {
+        height: 8px;
+    }
+
+    /* Alerts */
+    .stAlert {
+        border-radius: 10px;
+        border: none;
+    }
+
+    /* Dataframe styling */
+    .stDataFrame {
+        border-radius: 10px;
+        overflow: hidden;
+    }
+
+    /* Status badges */
+    .status-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
+    }
+
+    .status-success {
+        background: #d1fae5;
+        color: #065f46;
+    }
+
+    .status-error {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+
+    .status-warning {
+        background: #fef3c7;
+        color: #92400e;
+    }
+
+    .status-info {
+        background: #e0e7ff;
+        color: #3730a3;
+    }
+
+    /* Footer */
+    .app-footer {
+        text-align: center;
+        padding: 2rem 0 1rem 0;
+        margin-top: 3rem;
+        border-top: 1px solid #e5e7eb;
+        color: #9ca3af;
+        font-size: 0.85rem;
+    }
+
+    .app-footer a {
+        color: #667eea;
+        text-decoration: none;
+    }
+
+    /* Connection status indicator */
+    .connection-status {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        font-weight: 500;
+    }
+
+    .connection-connected {
+        background: #d1fae5;
+        color: #065f46;
+    }
+
+    .connection-disconnected {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+
+    /* Info box styling */
+    .info-box {
+        background: #f0f4ff;
+        border-left: 4px solid #667eea;
+        padding: 1rem;
+        border-radius: 0 8px 8px 0;
+        margin: 1rem 0;
+    }
+
+    .info-box p {
+        margin: 0;
+        color: #4338ca;
+    }
+
+    /* Checkbox styling */
+    .stCheckbox > label > span {
+        font-weight: 500;
+        color: #374151;
+    }
+
+    /* Slider styling */
+    .stSlider > div > div > div {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+
+    /* Tab styling when used */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0;
+        background: #f3f4f6;
+        border-radius: 10px;
+        padding: 4px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px;
+        font-weight: 600;
+        padding: 0.5rem 1.5rem;
+    }
+
+    .stTabs [aria-selected="true"] {
+        background: white;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Quick stats row */
+    .quick-stats {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .quick-stat {
+        flex: 1;
+        background: white;
+        border-radius: 10px;
+        padding: 1rem;
+        text-align: center;
+        border: 1px solid #e5e7eb;
+    }
+
+    /* Log entries */
+    .log-entry {
+        padding: 0.5rem 0.75rem;
+        border-radius: 6px;
+        margin: 0.25rem 0;
+        font-family: 'SF Mono', Monaco, monospace;
+        font-size: 0.85rem;
+    }
+
+    .log-success {
+        background: #f0fdf4;
+        color: #166534;
+    }
+
+    .log-error {
+        background: #fef2f2;
+        color: #991b1b;
+    }
+
+    .log-skip {
+        background: #fefce8;
+        color: #854d0e;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Config file path
 CONFIG_PATH = Path.home() / ".evernote_extractor" / "config.json"
@@ -78,46 +505,113 @@ def get_database():
     return ImportDatabase(db_path)
 
 
+def render_sidebar_header():
+    """Render the sidebar header with logo and branding."""
+    st.sidebar.markdown("""
+    <div class="sidebar-logo">
+        <h2>📝 Evernote → XWiki</h2>
+        <p>Migration Tool</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_main_header(title: str, subtitle: str = ""):
+    """Render the main page header."""
+    subtitle_html = f"<p>{subtitle}</p>" if subtitle else ""
+    st.markdown(f"""
+    <div class="main-header">
+        <h1>{title}</h1>
+        {subtitle_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_section_header(title: str, icon: str = "", subtitle: str = ""):
+    """Render a section header with optional icon and subtitle."""
+    icon_html = f"{icon} " if icon else ""
+    st.markdown(f'<div class="section-header">{icon_html}{title}</div>', unsafe_allow_html=True)
+    if subtitle:
+        st.markdown(f'<div class="section-subheader">{subtitle}</div>', unsafe_allow_html=True)
+
+
+def render_metric_card(label: str, value: str | int, color_class: str = ""):
+    """Render a styled metric card."""
+    color = f" {color_class}" if color_class else ""
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-value{color}">{value}</div>
+        <div class="metric-label">{label}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_footer():
+    """Render the application footer."""
+    st.markdown("""
+    <div class="app-footer">
+        <p>Evernote to XWiki Importer &bull; Built with Streamlit</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def main():
     """Main application."""
-    st.title("📝 Evernote to XWiki Importer")
-
     db = get_database()
 
-    # Sidebar navigation
+    # Sidebar
+    render_sidebar_header()
+
+    # Navigation with icons
     page = st.sidebar.radio(
-        "Navigation",
-        ["Import from Evernote", "Import from ENEX Files", "Import History", "Statistics"],
+        "NAVIGATION",
+        ["🔗  Import from Evernote", "📄  Import from ENEX Files", "📋  Import History", "📊  Statistics"],
         index=0,
+        label_visibility="visible",
     )
 
-    if page == "Import from Evernote":
+    # Sidebar footer
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("""
+    <div style="padding: 1rem; color: rgba(255,255,255,0.5); font-size: 0.8rem;">
+        <p style="margin: 0;">Need help?</p>
+        <p style="margin: 0.5rem 0 0 0; color: rgba(255,255,255,0.7);">
+            Check the documentation or visit the GitHub repository.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Route to pages
+    if "Evernote" in page and "ENEX" not in page:
         render_evernote_direct_page(db)
-    elif page == "Import from ENEX Files":
+    elif "ENEX" in page:
         render_import_page(db)
-    elif page == "Import History":
+    elif "History" in page:
         render_history_page(db)
     else:
         render_stats_page(db)
 
+    # Footer
+    render_footer()
+
 
 def render_evernote_direct_page(db: ImportDatabase):
     """Render the direct Evernote import page."""
-    st.header("Import Directly from Evernote")
+    render_main_header(
+        "Import from Evernote",
+        "Connect directly to your Evernote account and import notes to XWiki"
+    )
 
     # Load config
     config = load_config()
 
     # Evernote API Configuration
-    with st.expander("Evernote API Configuration", expanded=not config.get("evernote_consumer_key")):
+    with st.expander("🔑  Evernote API Configuration", expanded=not config.get("evernote_consumer_key")):
         st.markdown("""
-        To connect directly to Evernote, you need API credentials.
-
-        **To get credentials:**
-        1. Go to [Evernote Developer Portal](https://dev.evernote.com/)
-        2. Create a new API Key
-        3. Enter your Consumer Key and Secret below
-        """)
+        <div class="info-box">
+            <p><strong>To get credentials:</strong> Visit the <a href="https://dev.evernote.com/" target="_blank">Evernote Developer Portal</a>,
+            create a new API Key, and enter your Consumer Key and Secret below.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
         col1, col2 = st.columns(2)
         with col1:
@@ -140,12 +634,15 @@ def render_evernote_direct_page(db: ImportDatabase):
             help="Use Evernote's sandbox environment for testing",
         )
 
-        if st.button("Save Evernote API Settings"):
-            config["evernote_consumer_key"] = consumer_key
-            config["evernote_consumer_secret"] = consumer_secret
-            config["evernote_sandbox"] = use_sandbox
-            save_config(config)
-            st.success("Evernote API settings saved!")
+        st.markdown("<br>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            if st.button("💾  Save API Settings", type="secondary", use_container_width=True):
+                config["evernote_consumer_key"] = consumer_key
+                config["evernote_consumer_secret"] = consumer_secret
+                config["evernote_sandbox"] = use_sandbox
+                save_config(config)
+                st.success("✓ Evernote API settings saved!")
 
     # Check if API credentials are configured
     if not config.get("evernote_consumer_key") or not config.get("evernote_consumer_secret"):
@@ -153,7 +650,7 @@ def render_evernote_direct_page(db: ImportDatabase):
         return
 
     # XWiki Configuration
-    with st.expander("XWiki Configuration", expanded=True):
+    with st.expander("🌐  XWiki Configuration", expanded=True):
         col1, col2 = st.columns(2)
 
         with col1:
@@ -161,12 +658,14 @@ def render_evernote_direct_page(db: ImportDatabase):
                 "XWiki URL",
                 value=config.get("wiki_url", ""),
                 placeholder="https://yourwiki.xwiki.cloud",
+                help="The base URL of your XWiki instance"
             )
 
         with col2:
             target_space = st.text_input(
                 "Target Space",
                 value=config.get("target_space", "ImportedNotes"),
+                help="XWiki space where notes will be imported"
             )
 
         col3, col4 = st.columns(2)
@@ -175,6 +674,7 @@ def render_evernote_direct_page(db: ImportDatabase):
             username = st.text_input(
                 "XWiki Username",
                 value=config.get("username", ""),
+                help="Your XWiki login username"
             )
 
         with col4:
@@ -182,25 +682,31 @@ def render_evernote_direct_page(db: ImportDatabase):
                 "XWiki Password",
                 value=config.get("password", ""),
                 type="password",
+                help="Your XWiki login password"
             )
 
     # Evernote Connection
-    st.subheader("Connect to Evernote")
+    st.markdown("---")
+    render_section_header("Connect to Evernote", "🔗", "Authenticate with your Evernote account")
 
     # Check for existing token
     existing_token = load_token()
 
     if existing_token:
-        st.success("Connected to Evernote (token saved)")
+        st.markdown("""
+        <div class="connection-status connection-connected">
+            <span>✓</span> <strong>Connected to Evernote</strong> — Authentication token saved
+        </div>
+        """, unsafe_allow_html=True)
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns([1, 1, 2])
         with col1:
-            if st.button("Disconnect from Evernote"):
+            if st.button("🔌  Disconnect", type="secondary"):
                 delete_token()
                 st.rerun()
 
         with col2:
-            if st.button("Test Connection"):
+            if st.button("🔄  Test Connection", type="secondary"):
                 with st.spinner("Testing connection..."):
                     try:
                         client = EvernoteClient(
@@ -212,12 +718,13 @@ def render_evernote_direct_page(db: ImportDatabase):
                             st.error(f"Connection failed: {user_info['error']}")
                             st.info("Your token may have expired. Try disconnecting and reconnecting.")
                         else:
-                            st.success(f"Connected as: {user_info.get('username', 'Unknown')}")
+                            st.success(f"✓ Connected as: **{user_info.get('username', 'Unknown')}**")
                     except Exception as e:
                         st.error(f"Connection failed: {e}")
 
         # Notebook selection and import
-        st.subheader("Select Notebooks to Import")
+        st.markdown("---")
+        render_section_header("Select Notebooks", "📚", "Choose which notebooks to import to XWiki")
 
         try:
             client = EvernoteClient(
@@ -261,34 +768,44 @@ def render_evernote_direct_page(db: ImportDatabase):
                             st.caption(f"{nb.note_count} notes")
 
                 # Import options
-                st.subheader("Import Options")
+                st.markdown("---")
+                render_section_header("Import Options", "⚙️", "Configure how notes should be imported")
 
-                rate_limit = st.slider("Rate limit (seconds)", 0.1, 2.0, 0.5, 0.1)
-
-                # Skip options
-                st.markdown("**Skip Options**")
-                col1, col2 = st.columns(2)
+                col1, col2 = st.columns([1, 1])
                 with col1:
+                    rate_limit = st.slider(
+                        "API Rate Limit (seconds between requests)",
+                        0.1, 2.0, 0.5, 0.1,
+                        help="Delay between API calls to avoid rate limiting"
+                    )
+
+                with col2:
+                    st.markdown("**Skip Existing Notes**")
                     skip_existing_db = st.checkbox(
-                        "Skip if previously imported (database)",
+                        "Skip if in local database",
                         value=True,
-                        help="Skip notes that were imported in a previous session (fast, checks local database)",
+                        help="Skip notes that were imported in a previous session (fast)",
                         key="evernote_skip_db",
                     )
-                with col2:
                     skip_existing_xwiki = st.checkbox(
                         "Skip if exists in XWiki",
                         value=False,
-                        help="Skip notes that already exist in XWiki (slower, checks XWiki API for each note)",
+                        help="Check XWiki for each note before importing (slower)",
                         key="evernote_skip_xwiki",
                     )
 
                 # Import button
-                if st.button(
-                    "Start Import",
-                    disabled=not selected_notebooks or not wiki_url or not username or not password,
-                    type="primary",
-                ):
+                st.markdown("<br>", unsafe_allow_html=True)
+                btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 2])
+                with btn_col1:
+                    start_import = st.button(
+                        "🚀  Start Import",
+                        disabled=not selected_notebooks or not wiki_url or not username or not password,
+                        type="primary",
+                        use_container_width=True,
+                    )
+
+                if start_import:
                     # Save XWiki config
                     config["wiki_url"] = wiki_url
                     config["target_space"] = target_space
@@ -314,9 +831,18 @@ def render_evernote_direct_page(db: ImportDatabase):
             st.info("Try disconnecting and reconnecting to Evernote.")
 
     else:
-        st.info("Click the button below to connect to your Evernote account.")
+        st.markdown("""
+        <div class="connection-status connection-disconnected">
+            <span>○</span> <strong>Not Connected</strong> — Click below to authenticate with Evernote
+        </div>
+        """, unsafe_allow_html=True)
 
-        if st.button("Connect to Evernote", type="primary"):
+        st.markdown("<br>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            connect_btn = st.button("🔗  Connect to Evernote", type="primary", use_container_width=True)
+
+        if connect_btn:
             with st.spinner("Opening browser for authentication..."):
                 try:
                     credentials = EvernoteCredentials(
@@ -419,7 +945,7 @@ def run_evernote_import(
             notebook_name=notebook_path,
             progress_callback=progress_callback,
         ):
-            from .progress import generate_note_identifier
+            from Evernote_Extractor.progress import generate_note_identifier
 
             note_id = generate_note_identifier(note.title, note.created)
 
@@ -509,13 +1035,16 @@ def run_evernote_import(
 
 def render_import_page(db: ImportDatabase):
     """Render the ENEX file import page."""
-    st.header("Import from ENEX Files")
+    render_main_header(
+        "Import from ENEX Files",
+        "Import notes from Evernote export files (.enex) to XWiki"
+    )
 
     # Load saved configuration
     config = load_config()
 
     # Configuration section
-    with st.expander("XWiki Configuration", expanded=True):
+    with st.expander("🌐  XWiki Configuration", expanded=True):
         col1, col2 = st.columns(2)
 
         with col1:
@@ -564,10 +1093,11 @@ def render_import_page(db: ImportDatabase):
                 )
 
         # Test Connection buttons
+        st.markdown("<br>", unsafe_allow_html=True)
         btn_col1, btn_col2, btn_col3 = st.columns(3)
 
         with btn_col1:
-            if st.button("Test Connection", type="secondary"):
+            if st.button("🔌  Test Connection", type="secondary", use_container_width=True):
                 if not wiki_url:
                     st.error("Please enter a Wiki URL")
                 elif not username:
@@ -600,7 +1130,7 @@ def render_import_page(db: ImportDatabase):
                             st.error(f"Connection error: {e}")
 
         with btn_col2:
-            if st.button("Test Page Creation", type="secondary"):
+            if st.button("📝  Test Page Creation", type="secondary", use_container_width=True):
                 if not wiki_url or not username or not password:
                     st.error("Please fill in all XWiki credentials first")
                 else:
@@ -629,7 +1159,7 @@ Response: {result.get('response', result.get('error'))}
                             st.error(f"Error: {e}")
 
         with btn_col3:
-            if st.button("Debug Auth", type="secondary"):
+            if st.button("🔍  Debug Auth", type="secondary", use_container_width=True):
                 if not wiki_url or not username or not password:
                     st.error("Please fill in all XWiki credentials first")
                 else:
@@ -653,12 +1183,14 @@ Auth header present: True
                             st.error(f"Error: {e}")
 
     # File selection
-    st.subheader("Select Source")
+    st.markdown("---")
+    render_section_header("Select Source", "📁", "Choose the ENEX file or folder to import")
 
     source_type = st.radio(
         "Source Type",
-        ["Single File", "Directory"],
+        ["📄  Single File", "📂  Directory"],
         horizontal=True,
+        label_visibility="collapsed"
     )
 
     source_path = st.text_input(
@@ -669,31 +1201,40 @@ Auth header present: True
     )
 
     # Options
-    col1, col2 = st.columns(2)
-    with col1:
-        dry_run = st.checkbox("Dry Run", help="Preview without uploading")
-    with col2:
-        rate_limit = st.slider("Rate Limit (seconds)", 0.1, 2.0, 0.5, 0.1)
+    st.markdown("---")
+    render_section_header("Import Options", "⚙️", "Configure how notes should be imported")
 
-    # Skip options
-    st.markdown("**Skip Options**")
     col1, col2 = st.columns(2)
     with col1:
-        skip_existing_db = st.checkbox(
-            "Skip if previously imported (database)",
-            value=True,
-            help="Skip notes that were imported in a previous session (fast, checks local database)",
+        dry_run = st.checkbox(
+            "🔍  Dry Run Mode",
+            help="Preview the import without making any changes to XWiki"
         )
+        rate_limit = st.slider(
+            "API Rate Limit (seconds)",
+            0.1, 2.0, 0.5, 0.1,
+            help="Delay between API calls to avoid rate limiting"
+        )
+
     with col2:
+        st.markdown("**Skip Existing Notes**")
+        skip_existing_db = st.checkbox(
+            "Skip if in local database",
+            value=True,
+            help="Skip notes that were imported in a previous session (fast)",
+        )
         skip_existing_xwiki = st.checkbox(
             "Skip if exists in XWiki",
             value=False,
-            help="Skip notes that already exist in XWiki (slower, checks XWiki API for each note)",
+            help="Check XWiki for each note before importing (slower)",
         )
 
     # Validation
     can_import = True
     validation_messages = []
+
+    # Adjust source_type check for new format with emoji
+    is_single_file = "Single" in source_type
 
     if not source_path:
         can_import = False
@@ -701,7 +1242,7 @@ Auth header present: True
     elif not Path(source_path).exists():
         can_import = False
         validation_messages.append(f"Path does not exist: {source_path}")
-    elif source_type == "Single File" and not source_path.endswith(".enex"):
+    elif is_single_file and not source_path.endswith(".enex"):
         can_import = False
         validation_messages.append("Single file must be an .enex file")
 
@@ -719,14 +1260,16 @@ Auth header present: True
 
     # Show validation messages
     if validation_messages:
+        st.markdown("---")
         for msg in validation_messages:
             st.warning(msg)
 
     # Action buttons
+    st.markdown("---")
     btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 2])
 
     with btn_col1:
-        if st.button("Save Settings"):
+        if st.button("💾  Save Settings", type="secondary", use_container_width=True):
             new_config = {
                 "wiki_url": wiki_url,
                 "target_space": target_space,
@@ -735,32 +1278,39 @@ Auth header present: True
                 "source_path": source_path,
             }
             save_config(new_config)
-            st.success("Settings saved!")
+            st.success("✓ Settings saved!")
 
     with btn_col2:
-        if st.button("Start Import", disabled=not can_import, type="primary"):
-            # Save settings before import
-            new_config = {
-                "wiki_url": wiki_url,
-                "target_space": target_space,
-                "username": username,
-                "password": password,
-                "source_path": source_path,
-            }
-            save_config(new_config)
+        start_import = st.button(
+            "🚀  Start Import",
+            disabled=not can_import,
+            type="primary",
+            use_container_width=True
+        )
 
-            run_import(
-                db=db,
-                source_path=source_path,
-                wiki_url=wiki_url,
-                username=username,
-                password=password,
-                target_space=target_space,
-                dry_run=dry_run,
-                skip_existing_db=skip_existing_db,
-                skip_existing_xwiki=skip_existing_xwiki,
-                rate_limit=rate_limit,
-            )
+    if start_import:
+        # Save settings before import
+        new_config = {
+            "wiki_url": wiki_url,
+            "target_space": target_space,
+            "username": username,
+            "password": password,
+            "source_path": source_path,
+        }
+        save_config(new_config)
+
+        run_import(
+            db=db,
+            source_path=source_path,
+            wiki_url=wiki_url,
+            username=username,
+            password=password,
+            target_space=target_space,
+            dry_run=dry_run,
+            skip_existing_db=skip_existing_db,
+            skip_existing_xwiki=skip_existing_xwiki,
+            rate_limit=rate_limit,
+        )
 
 
 def run_import(
@@ -950,44 +1500,57 @@ def run_import(
 
 def render_history_page(db: ImportDatabase):
     """Render the import history page."""
-    st.header("Import History")
+    render_main_header(
+        "Import History",
+        "View and manage your past import sessions"
+    )
 
     # Session filter
     sessions = db.get_recent_sessions(limit=50)
 
     if not sessions:
-        st.info("No import sessions found. Start an import to see history here.")
+        st.info("📭 No import sessions found. Start an import to see history here.")
         return
 
     # Session selector
     session_options = {
-        f"Session {s.id} - {s.started_at.strftime('%Y-%m-%d %H:%M')} ({s.status.value})": s.id
+        f"Session {s.id} — {s.started_at.strftime('%Y-%m-%d %H:%M')} ({s.status.value})": s.id
         for s in sessions
     }
 
-    selected = st.selectbox("Select Session", options=list(session_options.keys()))
+    selected = st.selectbox("📋  Select Session", options=list(session_options.keys()))
     session_id = session_options[selected]
 
     session = db.get_session(session_id)
 
     if session:
-        # Session details
+        # Session details with styled metrics
+        st.markdown("---")
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Notes", session.total_notes)
+            render_metric_card("Total Notes", session.total_notes, "metric-info")
         with col2:
-            st.metric("Completed", session.completed_notes)
+            render_metric_card("Completed", session.completed_notes, "metric-success")
         with col3:
-            st.metric("Failed", session.failed_notes)
+            render_metric_card("Failed", session.failed_notes, "metric-danger")
         with col4:
-            st.metric("Skipped", session.skipped_notes)
+            render_metric_card("Skipped", session.skipped_notes, "metric-warning")
 
-        st.markdown(f"**Source:** `{session.source_path}`")
-        st.markdown(f"**Wiki URL:** {session.wiki_url}")
-        st.markdown(f"**Target Space:** {session.target_space}")
+        # Session info
+        st.markdown("<br>", unsafe_allow_html=True)
+        info_col1, info_col2 = st.columns(2)
+        with info_col1:
+            st.markdown(f"**Source:** `{session.source_path}`")
+            st.markdown(f"**Wiki URL:** {session.wiki_url}")
+        with info_col2:
+            st.markdown(f"**Target Space:** {session.target_space}")
+            if session.finished_at:
+                duration = session.finished_at - session.started_at
+                st.markdown(f"**Duration:** {duration.seconds // 60}m {duration.seconds % 60}s")
 
         # Record filters
-        st.subheader("Import Records")
+        st.markdown("---")
+        render_section_header("Import Records", "📄", "View individual note import results")
 
         status_filter = st.selectbox(
             "Filter by Status",
@@ -1026,39 +1589,51 @@ def render_history_page(db: ImportDatabase):
             st.info("No records found for the selected filter.")
 
         # Delete session button
-        if st.button("Delete Session", type="secondary"):
-            db.delete_session(session_id)
-            st.success("Session deleted. Refresh to see changes.")
-            st.rerun()
+        st.markdown("---")
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            if st.button("🗑️  Delete Session", type="secondary", use_container_width=True):
+                db.delete_session(session_id)
+                st.success("✓ Session deleted!")
+                st.rerun()
 
 
 def render_stats_page(db: ImportDatabase):
     """Render the statistics page."""
-    st.header("Import Statistics")
+    render_main_header(
+        "Statistics Dashboard",
+        "Overview of all your import activity"
+    )
 
     stats = db.get_stats()
 
+    # Main metrics
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.metric("Total Notes Processed", stats["total_notes"])
+        render_metric_card("Total Processed", stats["total_notes"], "metric-info")
 
     with col2:
-        st.metric("Successfully Imported", stats["completed"])
+        render_metric_card("Imported", stats["completed"], "metric-success")
 
     with col3:
-        st.metric("Failed", stats["failed"])
+        render_metric_card("Failed", stats["failed"], "metric-danger")
 
     with col4:
-        st.metric("Total Sessions", stats["total_sessions"])
+        render_metric_card("Sessions", stats["total_sessions"], "")
 
     # Success rate
+    st.markdown("<br>", unsafe_allow_html=True)
     if stats["total_notes"] > 0:
         success_rate = (stats["completed"] / stats["total_notes"]) * 100
-        st.progress(success_rate / 100, text=f"Success Rate: {success_rate:.1f}%")
+        st.markdown(f"### Success Rate: **{success_rate:.1f}%**")
+        st.progress(success_rate / 100)
+    else:
+        st.info("No import data yet. Run your first import to see statistics.")
 
     # Recent sessions
-    st.subheader("Recent Sessions")
+    st.markdown("---")
+    render_section_header("Recent Sessions", "📅", "Your latest import sessions")
 
     sessions = db.get_recent_sessions(limit=10)
 
@@ -1070,33 +1645,46 @@ def render_stats_page(db: ImportDatabase):
                 delta = s.finished_at - s.started_at
                 duration = f"{delta.seconds // 60}m {delta.seconds % 60}s"
 
+            # Add status emoji
+            status_emoji = {
+                "completed": "✅",
+                "failed": "❌",
+                "in_progress": "⏳",
+                "pending": "⏸️"
+            }.get(s.status.value, "")
+
             table_data.append({
                 "ID": s.id,
                 "Started": s.started_at.strftime("%Y-%m-%d %H:%M"),
-                "Status": s.status.value,
+                "Status": f"{status_emoji} {s.status.value}",
                 "Total": s.total_notes,
                 "Completed": s.completed_notes,
                 "Failed": s.failed_notes,
-                "Duration": duration or "In progress",
+                "Duration": duration or "⏳ In progress",
             })
 
-        st.dataframe(table_data, use_container_width=True)
+        st.dataframe(table_data, use_container_width=True, hide_index=True)
     else:
-        st.info("No sessions found.")
+        st.info("📭 No sessions found.")
 
     # Failed notes summary
-    st.subheader("Recent Failed Imports")
+    st.markdown("---")
+    render_section_header("Recent Failed Imports", "⚠️", "Notes that encountered errors during import")
 
     failed_records = db.get_all_records(status=ImportStatus.FAILED, limit=20)
 
     if failed_records:
         for r in failed_records:
-            with st.expander(f"❌ {r.note_title}"):
-                st.markdown(f"**Source:** `{r.source_file}`")
-                st.markdown(f"**Error:** {r.error_message}")
-                st.markdown(f"**Time:** {r.updated_at.strftime('%Y-%m-%d %H:%M:%S')}")
+            with st.expander(f"❌  {r.note_title}"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown(f"**Source:** `{r.source_file}`")
+                    st.markdown(f"**Time:** {r.updated_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                with col2:
+                    st.markdown(f"**Error:**")
+                    st.code(r.error_message, language=None)
     else:
-        st.success("No failed imports!")
+        st.success("✨ No failed imports! All your notes were imported successfully.")
 
 
 if __name__ == "__main__":
