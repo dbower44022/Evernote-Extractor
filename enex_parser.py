@@ -189,3 +189,66 @@ def count_notes_in_enex(file_path: Path | str) -> int:
     root = tree.getroot()
 
     return len(root.findall("note"))
+
+
+def get_note_summaries_from_enex(file_path: Path | str) -> list[dict]:
+    """
+    Extract lightweight note summaries from an ENEX file.
+
+    Only reads title and created date — skips resource elements entirely,
+    so this is much faster than full parsing for large files.
+
+    Returns list of {"title": str, "created": datetime | None} dicts.
+    """
+    file_path = Path(file_path)
+
+    if not file_path.exists():
+        raise FileNotFoundError(f"ENEX file not found: {file_path}")
+
+    parser = etree.XMLParser(huge_tree=True)
+    tree = etree.parse(str(file_path), parser)
+    root = tree.getroot()
+
+    summaries = []
+    for note_elem in root.findall("note"):
+        title_elem = note_elem.find("title")
+        title = title_elem.text if title_elem is not None and title_elem.text else "Untitled"
+
+        created_elem = note_elem.find("created")
+        created = parse_enex_datetime(created_elem.text) if created_elem is not None and created_elem.text else None
+
+        summaries.append({"title": title, "created": created})
+        note_elem.clear()
+
+    return summaries
+
+
+def build_enex_inventory(source_path: Path | str) -> tuple[dict[str, list[dict]], int]:
+    """
+    Build an inventory of all notes across ENEX file(s).
+
+    Args:
+        source_path: Path to a single ENEX file or a directory containing ENEX files.
+
+    Returns:
+        Tuple of (inventory, grand_total) where inventory maps each ENEX file path
+        (as string) to its list of note summaries, and grand_total is the total
+        note count across all files.
+    """
+    source = Path(source_path)
+    inventory: dict[str, list[dict]] = {}
+    grand_total = 0
+
+    if source.is_file() and source.suffix.lower() == ".enex":
+        summaries = get_note_summaries_from_enex(source)
+        inventory[str(source)] = summaries
+        grand_total = len(summaries)
+    elif source.is_dir():
+        for enex_file in sorted(source.rglob("*.enex"), key=lambda p: str(p).casefold()):
+            summaries = get_note_summaries_from_enex(enex_file)
+            inventory[str(enex_file)] = summaries
+            grand_total += len(summaries)
+    else:
+        raise ValueError(f"Source path is not an ENEX file or directory: {source}")
+
+    return inventory, grand_total

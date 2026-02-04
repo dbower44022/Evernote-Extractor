@@ -7,13 +7,14 @@ from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
+from streamlit_file_browser import st_file_browser
 
 # Handle imports - add parent to path for package imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from Evernote_Extractor.converter import convert_note
 from Evernote_Extractor.database import ImportDatabase, ImportStatus
-from Evernote_Extractor.enex_parser import count_notes_in_enex, parse_enex_directory, parse_enex_file
+from Evernote_Extractor.enex_parser import build_enex_inventory, count_notes_in_enex, parse_enex_directory, parse_enex_file
 from Evernote_Extractor.progress import generate_note_identifier
 from Evernote_Extractor.xwiki_client import XWikiClient
 from Evernote_Extractor.evernote_api import (
@@ -554,6 +555,71 @@ def render_footer():
     """, unsafe_allow_html=True)
 
 
+def render_path_chooser(label: str, default_value: str, key_prefix: str, help_text: str) -> str:
+    """Render a path input with an interactive file browser.
+
+    Provides both a text input for typing/pasting and an expandable file browser
+    for visually selecting ENEX files or directories. The browser includes a
+    "Browse from" input so the user can navigate to any location on the filesystem.
+
+    Returns the selected path string.
+    """
+    # Determine the session state key for the chosen path
+    state_key = f"{key_prefix}_chosen_path"
+
+    # If the browser previously set a path, use it as the default
+    if state_key in st.session_state:
+        default_value = st.session_state[state_key]
+
+    source_path = st.text_input(
+        label,
+        value=default_value,
+        placeholder="/path/to/notes.enex or /path/to/exports/",
+        help=help_text,
+        key=f"{key_prefix}_text_input",
+    )
+
+    with st.expander("Browse for file or directory..."):
+        # Let the user set where the browser starts
+        browse_root_key = f"{key_prefix}_browse_root"
+        default_root = str(Path.home())
+        if source_path and Path(source_path).exists():
+            default_root = str(Path(source_path).parent) if Path(source_path).is_file() else source_path
+
+        browse_root = st.text_input(
+            "Browse from",
+            value=st.session_state.get(browse_root_key, default_root),
+            key=browse_root_key,
+            help="Change this to browse a different location",
+        )
+
+        # Validate browse root
+        if not browse_root or not Path(browse_root).is_dir():
+            st.warning("Enter a valid directory path above to browse.")
+        else:
+            event = st_file_browser(
+                browse_root,
+                key=f"{key_prefix}_browser",
+                show_choose_file=True,
+                show_choose_folder=True,
+                show_preview=False,
+                show_download_file=False,
+            )
+
+            if event and event.get("type") in ("CHOOSE_FILE", "CHOOSE_FOLDER"):
+                target = event.get("target", {})
+                relative_path = target.get("path", "")
+                if relative_path:
+                    chosen = str(Path(browse_root) / relative_path)
+                else:
+                    chosen = browse_root
+                st.session_state[state_key] = chosen
+                source_path = chosen
+                st.rerun()
+
+    return source_path
+
+
 def main():
     """Main application."""
     db = get_database()
@@ -564,7 +630,7 @@ def main():
     # Navigation with icons
     page = st.sidebar.radio(
         "NAVIGATION",
-        ["🔗  Import from Evernote", "📄  Import from ENEX Files", "📋  Import History", "📊  Statistics"],
+        ["🔗  Import from Evernote", "📄  Import from ENEX Files", "📋  Import History", "🔍  Reconciliation", "📊  Statistics"],
         index=0,
         label_visibility="visible",
     )
@@ -587,6 +653,8 @@ def main():
         render_import_page(db)
     elif "History" in page:
         render_history_page(db)
+    elif "Reconciliation" in page:
+        render_reconciliation_page(db)
     else:
         render_stats_page(db)
 
@@ -1193,11 +1261,11 @@ Auth header present: True
         label_visibility="collapsed"
     )
 
-    source_path = st.text_input(
-        "Path to ENEX file(s)",
-        value=config.get("source_path", ""),
-        placeholder="/path/to/notes.enex or /path/to/exports/",
-        help="Enter the full path to an ENEX file or directory containing ENEX files",
+    source_path = render_path_chooser(
+        label="Path to ENEX file(s)",
+        default_value=config.get("source_path", ""),
+        key_prefix="import_source",
+        help_text="Enter the full path to an ENEX file or directory containing ENEX files",
     )
 
     # Options
@@ -1281,36 +1349,83 @@ Auth header present: True
             st.success("✓ Settings saved!")
 
     with btn_col2:
-        start_import = st.button(
-            "🚀  Start Import",
+        scan_clicked = st.button(
+            "🔍  Scan & Preview",
             disabled=not can_import,
             type="primary",
-            use_container_width=True
+            use_container_width=True,
         )
 
-    if start_import:
-        # Save settings before import
-        new_config = {
-            "wiki_url": wiki_url,
-            "target_space": target_space,
-            "username": username,
-            "password": password,
-            "source_path": source_path,
-        }
-        save_config(new_config)
+    # Phase 1: Scan and show manifest
+    if scan_clicked and can_import:
+        with st.spinner("Scanning ENEX files..."):
+            try:
+                inventory, grand_total = build_enex_inventory(source_path)
+                st.session_state["import_manifest"] = inventory
+                st.session_state["import_manifest_total"] = grand_total
+                st.session_state["import_manifest_source"] = source_path
+            except Exception as e:
+                st.error(f"Error scanning ENEX files: {e}")
 
-        run_import(
-            db=db,
-            source_path=source_path,
-            wiki_url=wiki_url,
-            username=username,
-            password=password,
-            target_space=target_space,
-            dry_run=dry_run,
-            skip_existing_db=skip_existing_db,
-            skip_existing_xwiki=skip_existing_xwiki,
-            rate_limit=rate_limit,
-        )
+    # Phase 2: Display manifest and gate import behind confirmation
+    if "import_manifest" in st.session_state and st.session_state.get("import_manifest_source") == source_path:
+        inventory = st.session_state["import_manifest"]
+        grand_total = st.session_state["import_manifest_total"]
+
+        st.markdown("---")
+        render_section_header("Pre-Import Manifest", "📋", f"Found {grand_total} notes across {len(inventory)} file(s)")
+
+        # Group files by folder name relative to source path
+        source_p = Path(source_path)
+        base_dir = source_p if source_p.is_dir() else source_p.parent
+        folders: dict[str, list[tuple[str, list[dict]]]] = {}
+        for file_path_str, summaries in inventory.items():
+            fp = Path(file_path_str)
+            try:
+                rel = fp.parent.relative_to(base_dir)
+                folder_name = str(rel) if str(rel) != "." else "/"
+            except ValueError:
+                folder_name = "/"
+            if folder_name not in folders:
+                folders[folder_name] = []
+            folders[folder_name].append((fp.name, summaries))
+
+        for folder_name in sorted(folders.keys(), key=str.casefold):
+            files_in_folder = folders[folder_name]
+            folder_note_count = sum(len(s) for _, s in files_in_folder)
+            with st.expander(f"📂 {folder_name} — {len(files_in_folder)} file(s), {folder_note_count} notes"):
+                for file_name, summaries in sorted(files_in_folder, key=lambda x: x[0].casefold()):
+                    st.markdown(f"**{file_name}** ({len(summaries)} notes)")
+                    for s in summaries:
+                        created_str = s["created"].strftime("%Y-%m-%d %H:%M") if s["created"] else "no date"
+                        st.markdown(f"- {s['title']} ({created_str})")
+
+        st.info(f"Review the manifest above, then click **Start Import** to proceed. Total: **{grand_total}** notes.")
+
+        if st.button("🚀  Start Import", type="primary", key="start_import_confirmed"):
+            # Save settings before import
+            new_config = {
+                "wiki_url": wiki_url,
+                "target_space": target_space,
+                "username": username,
+                "password": password,
+                "source_path": source_path,
+            }
+            save_config(new_config)
+
+            run_import(
+                db=db,
+                source_path=source_path,
+                wiki_url=wiki_url,
+                username=username,
+                password=password,
+                target_space=target_space,
+                dry_run=dry_run,
+                skip_existing_db=skip_existing_db,
+                skip_existing_xwiki=skip_existing_xwiki,
+                rate_limit=rate_limit,
+                total_notes=grand_total,
+            )
 
 
 def run_import(
@@ -1324,25 +1439,26 @@ def run_import(
     skip_existing_db: bool,
     skip_existing_xwiki: bool,
     rate_limit: float,
+    total_notes: int | None = None,
 ):
     """Run the import process."""
     source = Path(source_path)
 
-    # Count notes first (recursively for directories)
-    with st.spinner("Scanning ENEX files..."):
-        total_notes = 0
-        enex_files = []
-        if source.is_file():
-            total_notes = count_notes_in_enex(source)
-            enex_files = [source]
-        else:
-            # Recursively find all ENEX files
-            enex_files = list(source.rglob("*.enex"))
-            for enex_file in enex_files:
-                total_notes += count_notes_in_enex(enex_file)
+    # Count notes if not already provided by manifest
+    if total_notes is None:
+        with st.spinner("Scanning ENEX files..."):
+            total_notes = 0
+            enex_files = []
+            if source.is_file():
+                total_notes = count_notes_in_enex(source)
+                enex_files = [source]
+            else:
+                enex_files = list(source.rglob("*.enex"))
+                for enex_file in enex_files:
+                    total_notes += count_notes_in_enex(enex_file)
 
-        if len(enex_files) > 1:
-            st.info(f"Found {len(enex_files)} ENEX files in directory tree")
+            if len(enex_files) > 1:
+                st.info(f"Found {len(enex_files)} ENEX files in directory tree")
 
     if total_notes == 0:
         st.error("No notes found in the specified path.")
@@ -1548,14 +1664,42 @@ def render_history_page(db: ImportDatabase):
                 duration = session.finished_at - session.started_at
                 st.markdown(f"**Duration:** {duration.seconds // 60}m {duration.seconds % 60}s")
 
+        # Per-file breakdown
+        st.markdown("---")
+        render_section_header("Per-File Breakdown", "📂", "Import results grouped by source ENEX file")
+
+        file_summary = db.get_session_file_summary(session_id)
+        if file_summary:
+            file_summary_data = []
+            for fs in file_summary:
+                file_summary_data.append({
+                    "Source File": Path(fs["source_file"]).name if fs["source_file"] else "-",
+                    "Full Path": fs["source_file"],
+                    "Total": fs["total"],
+                    "Completed": fs["completed"],
+                    "Failed": fs["failed"],
+                    "Skipped": fs["skipped"],
+                })
+            st.dataframe(file_summary_data, use_container_width=True, hide_index=True)
+
         # Record filters
         st.markdown("---")
         render_section_header("Import Records", "📄", "View individual note import results")
 
-        status_filter = st.selectbox(
-            "Filter by Status",
-            ["All", "Completed", "Failed", "Skipped", "Pending"],
-        )
+        filter_col1, filter_col2 = st.columns(2)
+        with filter_col1:
+            status_filter = st.selectbox(
+                "Filter by Status",
+                ["All", "Completed", "Failed", "Skipped", "Pending"],
+            )
+
+        with filter_col2:
+            file_options = ["All Files"] + [fs["source_file"] for fs in file_summary] if file_summary else ["All Files"]
+            file_filter = st.selectbox(
+                "Filter by File",
+                file_options,
+            )
+            file_filter_value = None if file_filter == "All Files" else file_filter
 
         status_map = {
             "All": None,
@@ -1565,26 +1709,65 @@ def render_history_page(db: ImportDatabase):
             "Pending": ImportStatus.PENDING,
         }
 
+        # Pagination controls
+        records_per_page = 500
+        page_key = "records_page"
+        if page_key not in st.session_state:
+            st.session_state[page_key] = 0
+        current_page = st.session_state[page_key]
+
         records = db.get_session_records(
             session_id,
             status=status_map[status_filter],
-            limit=100,
+            source_file=file_filter_value,
+            limit=records_per_page + 1,  # fetch one extra to detect if there's a next page
+            offset=current_page * records_per_page,
         )
 
-        if records:
+        has_next_page = len(records) > records_per_page
+        display_records = records[:records_per_page]
+
+        if display_records:
             # Display as table
             table_data = []
-            for r in records:
+            for r in display_records:
                 table_data.append({
-                    "Title": r.note_title[:50] + "..." if len(r.note_title) > 50 else r.note_title,
+                    "Source File": Path(r.source_file).name if r.source_file else "-",
+                    "Title": r.note_title[:80] + "..." if len(r.note_title) > 80 else r.note_title,
+                    "Identifier": r.note_identifier[:8] if r.note_identifier else "-",
                     "Status": r.status.value,
                     "Page URL": r.page_url or "-",
                     "Attachments": f"{r.attachments_uploaded}/{r.attachments_count}",
-                    "Error": r.error_message[:30] + "..." if r.error_message and len(r.error_message) > 30 else (r.error_message or "-"),
                     "Updated": r.updated_at.strftime("%H:%M:%S"),
                 })
 
             st.dataframe(table_data, use_container_width=True)
+
+            # Show full source file path and error details in expanders
+            error_records = [r for r in display_records if r.error_message]
+            if error_records:
+                with st.expander(f"Error Details ({len(error_records)} records with errors)"):
+                    for r in error_records:
+                        st.markdown(f"**{r.note_title}** (`{r.source_file}`)")
+                        st.code(r.error_message, language=None)
+                        st.markdown("---")
+
+            # Pagination controls
+            pag_col1, pag_col2, pag_col3 = st.columns([1, 2, 1])
+            with pag_col1:
+                if current_page > 0:
+                    if st.button("Previous Page", key="prev_page"):
+                        st.session_state[page_key] = current_page - 1
+                        st.rerun()
+            with pag_col2:
+                start_record = current_page * records_per_page + 1
+                end_record = start_record + len(display_records) - 1
+                st.markdown(f"<div style='text-align:center'>Showing records {start_record}–{end_record} (page {current_page + 1})</div>", unsafe_allow_html=True)
+            with pag_col3:
+                if has_next_page:
+                    if st.button("Next Page", key="next_page"):
+                        st.session_state[page_key] = current_page + 1
+                        st.rerun()
         else:
             st.info("No records found for the selected filter.")
 
@@ -1596,6 +1779,162 @@ def render_history_page(db: ImportDatabase):
                 db.delete_session(session_id)
                 st.success("✓ Session deleted!")
                 st.rerun()
+
+
+def render_reconciliation_page(db: ImportDatabase):
+    """Render the reconciliation tool page."""
+    render_main_header(
+        "Reconciliation",
+        "Compare ENEX source files against import records to find missing or orphaned notes"
+    )
+
+    # Session selector (reuse pattern from history page)
+    sessions = db.get_recent_sessions(limit=50)
+
+    if not sessions:
+        st.info("No import sessions found. Run an import first.")
+        return
+
+    session_options = {
+        f"Session {s.id} — {s.started_at.strftime('%Y-%m-%d %H:%M')} ({s.status.value})": s.id
+        for s in sessions
+    }
+
+    selected = st.selectbox("Select Import Session", options=list(session_options.keys()), key="recon_session")
+    session_id = session_options[selected]
+
+    session = db.get_session(session_id)
+
+    # Source path input, pre-filled from session
+    default_source = session.source_path if session else ""
+    source_path = render_path_chooser(
+        label="Source ENEX Path",
+        default_value=default_source,
+        key_prefix="recon_source",
+        help_text="Path to the ENEX file or directory used for this import session",
+    )
+
+    if st.button("Run Reconciliation", type="primary"):
+        if not source_path or not Path(source_path).exists():
+            st.error("Please enter a valid path to an ENEX file or directory.")
+            return
+
+        # Step 1: Build ENEX inventory
+        with st.spinner("Scanning ENEX files..."):
+            try:
+                inventory, enex_total = build_enex_inventory(source_path)
+            except Exception as e:
+                st.error(f"Error scanning ENEX files: {e}")
+                return
+
+        # Step 2: Get all import records for this session
+        with st.spinner("Loading import records..."):
+            records = db.get_session_records(session_id, limit=10000)
+
+        # Step 3: Build identifier sets for comparison
+        # ENEX side: generate identifiers
+        enex_notes: dict[str, dict] = {}  # identifier -> {title, created, source_file}
+        for file_path_str, summaries in inventory.items():
+            for s in summaries:
+                note_id = generate_note_identifier(s["title"], s["created"])
+                enex_notes[note_id] = {
+                    "title": s["title"],
+                    "created": s["created"],
+                    "source_file": file_path_str,
+                }
+
+        # DB side: collect identifiers
+        db_notes: dict[str, dict] = {}  # identifier -> {title, status, source_file}
+        for r in records:
+            db_notes[r.note_identifier] = {
+                "title": r.note_title,
+                "status": r.status.value,
+                "source_file": r.source_file,
+            }
+
+        enex_ids = set(enex_notes.keys())
+        db_ids = set(db_notes.keys())
+
+        # Step 4: Build comparison lists
+        in_enex_not_db = enex_ids - db_ids
+        in_db_not_enex = db_ids - enex_ids
+
+        # Summary metrics
+        st.markdown("---")
+        render_section_header("Reconciliation Results", "📊")
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            render_metric_card("ENEX Notes", enex_total, "metric-info")
+        with col2:
+            render_metric_card("DB Records", len(records), "metric-info")
+        with col3:
+            render_metric_card("Missing from DB", len(in_enex_not_db), "metric-danger" if in_enex_not_db else "metric-success")
+        with col4:
+            render_metric_card("Orphaned in DB", len(in_db_not_enex), "metric-warning" if in_db_not_enex else "metric-success")
+
+        # Per-file status breakdown
+        st.markdown("---")
+        render_section_header("Per-File Status Breakdown", "📂")
+
+        file_summary = db.get_session_file_summary(session_id)
+        file_summary_map = {fs["source_file"]: fs for fs in file_summary}
+
+        breakdown_data = []
+        for file_path_str, summaries in inventory.items():
+            db_info = file_summary_map.get(file_path_str, {})
+            breakdown_data.append({
+                "Source File": Path(file_path_str).name,
+                "In ENEX": len(summaries),
+                "In DB (Total)": db_info.get("total", 0),
+                "Completed": db_info.get("completed", 0),
+                "Failed": db_info.get("failed", 0),
+                "Skipped": db_info.get("skipped", 0),
+            })
+
+        if breakdown_data:
+            st.dataframe(breakdown_data, use_container_width=True, hide_index=True)
+
+        # Detail: notes in ENEX but not in DB
+        if in_enex_not_db:
+            st.markdown("---")
+            render_section_header("Missing from Database", "❌", f"{len(in_enex_not_db)} notes in ENEX files were never processed")
+
+            # Group by source file
+            missing_by_file: dict[str, list[dict]] = {}
+            for note_id in in_enex_not_db:
+                info = enex_notes[note_id]
+                src = info["source_file"]
+                if src not in missing_by_file:
+                    missing_by_file[src] = []
+                missing_by_file[src].append(info)
+
+            for file_path_str, notes in missing_by_file.items():
+                with st.expander(f"{Path(file_path_str).name} — {len(notes)} missing"):
+                    for n in notes:
+                        created_str = n["created"].strftime("%Y-%m-%d %H:%M") if n["created"] else "no date"
+                        st.markdown(f"- **{n['title']}** ({created_str})")
+
+        # Detail: notes in DB but not in ENEX
+        if in_db_not_enex:
+            st.markdown("---")
+            render_section_header("Orphaned Records", "⚠️", f"{len(in_db_not_enex)} records in DB with no matching ENEX note")
+
+            orphan_by_file: dict[str, list[dict]] = {}
+            for note_id in in_db_not_enex:
+                info = db_notes[note_id]
+                src = info["source_file"]
+                if src not in orphan_by_file:
+                    orphan_by_file[src] = []
+                orphan_by_file[src].append(info)
+
+            for file_path_str, notes in orphan_by_file.items():
+                with st.expander(f"{Path(file_path_str).name} — {len(notes)} orphaned"):
+                    for n in notes:
+                        st.markdown(f"- **{n['title']}** (status: {n['status']})")
+
+        if not in_enex_not_db and not in_db_not_enex:
+            st.success("All ENEX notes have matching database records. No discrepancies found.")
 
 
 def render_stats_page(db: ImportDatabase):

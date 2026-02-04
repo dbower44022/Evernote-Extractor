@@ -289,35 +289,72 @@ class ImportDatabase:
                 return self._row_to_record(row)
             return None
 
+    def get_session_file_summary(self, session_id: int) -> list[dict]:
+        """Get per-file breakdown for a session.
+
+        Returns list of dicts with keys: source_file, total, completed, failed, skipped.
+        """
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    source_file,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+                    SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) as skipped
+                FROM import_records
+                WHERE session_id = ?
+                GROUP BY source_file
+                ORDER BY source_file
+                """,
+                (session_id,),
+            ).fetchall()
+
+            return [
+                {
+                    "source_file": row["source_file"],
+                    "total": row["total"],
+                    "completed": row["completed"],
+                    "failed": row["failed"],
+                    "skipped": row["skipped"],
+                }
+                for row in rows
+            ]
+
     def get_session_records(
         self,
         session_id: int,
         status: ImportStatus | None = None,
+        source_file: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[ImportRecord]:
-        """Get records for a session."""
+        """Get records for a session, optionally filtered by status and/or source file."""
         with self._get_connection() as conn:
+            conditions = ["session_id = ?"]
+            params: list = [session_id]
+
             if status:
-                rows = conn.execute(
-                    """
-                    SELECT * FROM import_records
-                    WHERE session_id = ? AND status = ?
-                    ORDER BY created_at DESC
-                    LIMIT ? OFFSET ?
-                    """,
-                    (session_id, status.value, limit, offset),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT * FROM import_records
-                    WHERE session_id = ?
-                    ORDER BY created_at DESC
-                    LIMIT ? OFFSET ?
-                    """,
-                    (session_id, limit, offset),
-                ).fetchall()
+                conditions.append("status = ?")
+                params.append(status.value)
+
+            if source_file:
+                conditions.append("source_file = ?")
+                params.append(source_file)
+
+            where_clause = " AND ".join(conditions)
+            params.extend([limit, offset])
+
+            rows = conn.execute(
+                f"""
+                SELECT * FROM import_records
+                WHERE {where_clause}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            ).fetchall()
 
             return [self._row_to_record(row) for row in rows]
 
